@@ -11,7 +11,6 @@ import pandas as pd
 from scipy.stats import norm
 from datetime import datetime, date
 
-N = norm.cdf
 
 def bs_call(S, K, T, r, vol):
     d1 = (np.log(S/K) + (r + 0.5*vol**2)*T) / (vol*np.sqrt(T))
@@ -19,12 +18,18 @@ def bs_call(S, K, T, r, vol):
     price = S * norm.cdf(d1) - np.exp(-r * T) * K * norm.cdf(d2)
     return price
 
+def bs_put(S, K, T, r, vol):
+    d1 = (np.log(S/K) + (r + 0.5*vol**2)*T) / (vol*np.sqrt(T))
+    d2 = d1 - vol * np.sqrt(T)
+    price = (K * np.exp(-r * T) * norm.cdf(-d2) - S * norm.cdf(-d1))
+    return price
+
 def bs_vega(S, K, T, r, sigma):
     d1 = (np.log(S / K) + (r + 0.5 * sigma ** 2) * T) / (sigma * np.sqrt(T))
     vega = S * norm.pdf(d1) * np.sqrt(T)
     return vega
 
-def find_vol(target_value, S, K, T, r, *args):
+def find_vol_call(target_value, S, K, T, r, *args):
     MAX_ITERATIONS = 200
     PRECISION = 1.0e-5
     sigma = 0.5
@@ -37,43 +42,93 @@ def find_vol(target_value, S, K, T, r, *args):
         sigma = sigma + diff/vega # f(x) / f'(x)
     return sigma # value wasn't found, return best guess so far
 
+def find_vol_put(target_value, S, K, T, r, *args):
+    MAX_ITERATIONS = 200
+    PRECISION = 1.0e-5
+    sigma = 0.5
+    for i in range(0, MAX_ITERATIONS):
+        price = bs_put(S, K, T, r, sigma)
+        vega = bs_vega(S, K, T, r, sigma)
+        diff = target_value - price  # our root
+        if (abs(diff) < PRECISION):
+            return sigma
+        sigma = sigma + diff/vega # f(x) / f'(x)
+    return sigma # value wasn't found, return best guess so far
 
+def bs_delta_call(S, K, T, r, sigma):
+    d1 = (np.log(S / K) + (r + 0.5 * sigma ** 2) * T) / (sigma * np.sqrt(T))
+    delta = norm.cdf(d1)
+    return delta
 
-S = 27736
-K = np.array([26250,26500,26750,27000,27250,27500,27750,28000,28250,28500,28750,29000,29250,29500])
-bid_call = np.array([1984,1799,1622,1454,1294,1145,1005,875,756,647,549,461,383,314])
+def bs_delta_put(S, K, T, r, sigma):
+    d1 = (np.log(S / K) + (r + 0.5 * sigma ** 2) * T) / (sigma * np.sqrt(T))
+    delta = norm.cdf(d1) - 1
+    return delta
+
+def bs_gamma(S, K, T, r, sigma):
+    d1 = (np.log(S / K) + (r + 0.5 * sigma ** 2) * T) / (sigma * np.sqrt(T))
+    gamma = np.exp(-r * T)*norm.pdf(d1)/S*sigma*np.sqrt(T)
+    return gamma
+
+def bs_theta_call(S, K, T, r, sigma):
+    d1 = (np.log(S / K) + (r + 0.5 * sigma ** 2) * T) / (sigma * np.sqrt(T))
+    d2 = d1 - sigma * np.sqrt(T)
+    theta = -S*norm.pdf(d1)*sigma/2*np.sqrt(T) - r*K*np.exp(-r * T)*norm.cdf(d2)
+    return theta
+
+def bs_theta_put(S, K, T, r, sigma):
+    d1 = (np.log(S / K) + (r + 0.5 * sigma ** 2) * T) / (sigma * np.sqrt(T))
+    d2 = d1 - sigma * np.sqrt(T)
+    theta = -S*norm.pdf(d1)*sigma/2*np.sqrt(T) + r*K*np.exp(-r * T)*norm.cdf(-d2)
+    return theta
+
+def bs_greeks(S, K, T, r, sigma):
+    
+    d1 = (np.log(S / K) + (r + 0.5 * sigma ** 2) * T) / (sigma * np.sqrt(T))
+    d2 = d1 - sigma * np.sqrt(T)
+    delta_call = norm.cdf(d1)
+    delta_put = norm.cdf(d1) - 1
+    gamma = np.exp(-r * T)*norm.pdf(d1)/S*sigma*np.sqrt(T)
+    theta_call = -S*norm.pdf(d1)*sigma/100/2*np.sqrt(T) - r*K*np.exp(-r * T)*norm.cdf(d2)
+    theta_put = -S*norm.pdf(d1)*sigma/100/2*np.sqrt(T) + r*K*np.exp(-r * T)*norm.cdf(-d2)
+    vega = S * norm.pdf(d1) * np.sqrt(T)/100
+    greeks = np.array([delta_call,delta_put,gamma,theta_call,theta_put,vega])
+    return greeks
+
+#options data
+S = 27785
+K = np.array([26500,26750,27000,27250,27500,27750,28000,28250,28500,28750,29000,29250])
+bid_call = np.array([1799,1622,1454,1294,1145,1005,875,756,647,549,461,383])
 offer_call = bid_call*0.95
-offer_put = np.array([498,563,636,718,808,909,1019,1139,1270,1411,1563,1725,1897,2078])
-bid_put = offer_put*0.95
+bid_put = np.array([563,636,718,808,909,1019,1139,1270,1411,1563,1725,1897])
+offer_put = bid_put*0.95
 expiry = '14-04-2021'
 r = 0
 T = (datetime.strptime(expiry, "%d-%m-%Y") - datetime.utcnow()).days / 365
+#T = (datetime.strptime(expiry, "%d-%m-%Y") - datetime.strptime('02-03-2021', "%d-%m-%Y")).days / 365
 
-
+#create df with data
 array_gen = [K,bid_call,offer_call,bid_put,offer_put]
-df = pd.DataFrame(data = array_gen)
+options_df = pd.DataFrame(data = array_gen).T
+options_df.columns = ('K','bid_call','offer_call','bid_put','offer_put')
 
-for k in range(0,len(K)):
-    iv_call = find_vol(real_prices_call[k],S, K[k], T, r)
-    iv_put = find_vol(real_prices_call[k],S, K[k], T, r)
-    
-T = (datetime.strptime(expiry, "%d-%m-%Y") - datetime.utcnow()).days / 365
+#iv calculation
+options_df['iv_bid'] = 0
+options_df['iv_bid'] = options_df['iv_bid'].astype(np.float64)
+options_df['iv_offer'] = 0
+options_df['iv_offer'] = options_df['iv_offer'].astype(np.float64)
 
-iv = find_vol(call_price, S, K, T, r)
-call = bs_call(S, K, T, r, iv)
+for i, row in options_df.iterrows():
+    if options_df.K[i] < S:
+        options_df['iv_bid'][i] = find_vol_put(options_df.bid_put[i],S,options_df.K[i],T,r)
+        options_df['iv_offer'][i] = find_vol_put(options_df.offer_put[i],S,options_df.K[i],T,r)
+    else:
+        options_df['iv_bid'][i] = find_vol_call(options_df.bid_call[i],S,options_df.K[i],T,r)
+        options_df['iv_offer'][i] = find_vol_call(options_df.offer_call[i],S,options_df.K[i],T,r)
+        
+options_df.plot(x='K', y='iv_offer', marker='.')       
+#greeks calculation
 
+greeks = bs_greeks(S, 28000, T, r, 0.2914)
 
-Computing a single value is quick enough
-
-S = 100
-K = 100
-T = 11
-r = 0.01
-vol = 0.25
-
-V_market = bs_call(S, K, T, r, vol)
-implied_vol = find_vol(V_market, S, K, T, r)
-
-print ('Implied vol: %.2f%%' % (implied_vol * 100))
-print ('Market price = %.2f' % V_market)
-print ('Model price = %.2f' % bs_call(S, K, T, r, implied_vol))
+print(greeks[2])
