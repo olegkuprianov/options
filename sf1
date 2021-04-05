@@ -1,0 +1,120 @@
+"""
+Created on Sun Apr  4 16:26:30 2021
+
+@author: oksan
+"""
+
+import mysql.connector
+from datetime import datetime
+from datetime import timedelta
+import  pandas as pd
+import def_test_api
+from io import StringIO
+import json
+
+yesterday = datetime.today() - timedelta(days=1)
+yesterday_ymd = yesterday.strftime('%Y-%m-%d')
+
+date_since = yesterday_ymd
+date_until = yesterday_ymd
+
+#get data from appmetrica logs api
+data_events = def_test_api.logs_api_export(app_id = 3188596, 
+                             date_since = '2021-02-25', date_until = '2021-04-01',
+                             type_report = 'events', 
+                             fields = 'appmetrica_device_id,event_name,event_json,os_name,event_datetime')
+
+data_events1 = data_events
+data_events_csv = StringIO(data_events1)
+data_df1 = pd.read_csv(data_events_csv, sep=",")
+data_df = data_df1
+
+#app_id of buyers
+id_buyers = data_df[data_df['event_name'] == 'order_paid'].appmetrica_device_id
+id_buyers = id_buyers.reset_index(drop=True)
+id_buyers = id_buyers.to_list()
+
+#events_of_buyers
+events_buyers = data_df1[data_df['appmetrica_device_id'].isin(id_buyers)]
+events_uniq = pd.DataFrame(events_buyers['event_name'].unique())
+
+#filter id of registr
+id_reg = events_buyers[events_buyers['event_name'] == 'onboard_regist_success'].appmetrica_device_id
+events_buyers_reg = events_buyers[events_buyers['appmetrica_device_id'].isin(id_reg)]
+
+#filter by event
+events_buyers_reg_filt = events_buyers_reg[events_buyers_reg['event_name'].isin(['onboard_regist_success','order_paid'])]
+
+#group by id
+events_buyers_filt = events_buyers_reg_filt[events_buyers_reg_filt['event_name'] == 'order_paid']
+events_reg_filt = events_buyers_reg_filt[events_buyers_reg_filt['event_name'] == 'onboard_regist_success']
+del events_buyers_filt['event_json']
+del events_buyers_filt['os_name']
+events_buyers_filt = events_buyers_filt.groupby(['appmetrica_device_id','event_name']).min()
+events_buyers_filt.reset_index(level=0, inplace=True)
+events_reg_filt = events_reg_filt.reset_index(drop=True)
+events_buyers_filt['event_datetime'] = pd.to_datetime(events_buyers_filt['event_datetime'])
+events_reg_filt['event_datetime'] = pd.to_datetime(events_reg_filt['event_datetime'])
+
+time_per = []
+for x in range(0,len(events_buyers_filt)):
+    for k in range(0,len(events_reg_filt)):
+        if events_buyers_filt['appmetrica_device_id'][x] == events_reg_filt['appmetrica_device_id'][k]:
+            time_per1 = (events_buyers_filt['event_datetime'][x] - events_reg_filt['event_datetime'][k]).days            
+            time_per.append(time_per1)
+
+            
+events_buyers_filt['time_per'] = time_per
+id_fast_buyers = events_buyers_filt[events_buyers_filt['time_per'] <= 3]
+id_fast_buyers = id_fast_buyers['appmetrica_device_id'].to_list()
+events_buyers_fast_df = events_buyers_reg[events_buyers_reg['appmetrica_device_id'].isin(id_fast_buyers)]
+events_buyers_fast_df.to_excel('events_buyers_fast_df1.xlsx')
+
+#create dict
+events_buyers_fast_df = events_buyers_fast_df.reset_index(drop=True)
+uniq_id_keys = events_buyers_fast_df['appmetrica_device_id'].unique()
+events_df_dict = {elem : pd.DataFrame for elem in uniq_id_keys}
+for key in events_df_dict.keys():
+    events_df_dict[key] = events_buyers_fast_df[:][events_buyers_fast_df['appmetrica_device_id'] == key]
+    
+#sort by time
+for key, value in events_df_dict.items():
+    events_df_dict[key] = events_df_dict[key].sort_values(['event_datetime'])
+ 
+#delete all events after order_paid
+for key, value in events_df_dict.items():
+    events_df_dict[key] = events_df_dict[key].loc[:(events_df_dict[key] == 'order_paid').any(1).idxmax()]   
+    
+
+#add to excel
+for key, value in events_df_dict.items():
+    events_df_dict[key] = events_df_dict[key].reset_index(drop=True)
+with pd.ExcelWriter('data.xlsx') as writer:
+    for key, value in events_df_dict.items():
+        key1 = str(key)
+        events_df_dict[key].to_excel(writer,sheet_name = key1)
+
+with pd.ExcelWriter('output.xlsx') as writer:  
+    df1.to_excel(writer, sheet_name='Sheet_name_1')
+    df2.to_excel(writer, sheet_name='Sheet_name_2') 
+    
+    
+#delete duplicates
+for key, value in events_df_dict.items():
+    events_df_dict[key] = events_df_dict[key].reset_index(drop=True)
+for key, value in events_df_dict.items():
+    
+    events_df_dict[key]['to_del'] = '0'
+    
+for key, value in events_df_dict.items():
+    for i in range(0,len(events_df_dict[key])):
+        if i == len(events_df_dict[key])-1:
+            break
+        elif events_df_dict[key]['event_name'][i] == events_df_dict[key]['event_name'][i+1]:
+            events_df_dict[key]['to_del'][i] = '1'
+
+    
+
+for index, row in df.iterrows():
+    if row['a'] > 0:
+        df.drop(index, inplace=True)
