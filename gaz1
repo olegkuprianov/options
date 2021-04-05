@@ -1,0 +1,9 @@
+test_df = pd.DataFrame({'col1': ['A21', 'A21', 'A21','A21'], 'col2': ['st', 'pro','st','st'], 'col3': ['ka,ga,rt,ty,my', 'ka,ga,tm,yp,io,yu', 'ka,ga,rt,ty', 'ka,ga,rt'], 'col4': [1400, 1500, 1400, 1300]})
+
+
+
+  
+iter1 = test_df.groupby(['col1','col2','col4']).max('col3')
+iter1.reset_index(inplace=True)
+iter1 = iter1.groupby(['col1','col2'])['col3','col4'].min()
+iter1.reset_index(inplace=True)
